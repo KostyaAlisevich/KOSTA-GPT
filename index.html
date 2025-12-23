@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>KOSTA GPT</title>
+<link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;KOSTA GPT&quot;,&quot;short_name&quot;:&quot;KOSTA GPT&quot;,&quot;start_url&quot;:&quot;.&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#020617&quot;,&quot;theme_color&quot;:&quot;#020617&quot;}" />
+<meta name="theme-color" content="#020617">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{box-sizing:border-box;font-family:Arial}
+body{margin:0;background:#0f172a;color:#e5e7eb;height:100vh}
+.app{width:100%;height:100vh;background:#020617;display:flex;overflow:hidden}
+.sidebar{width:260px;background:#020617;border-right:1px solid #1e293b;display:none;flex-direction:column}
+.sidebar h3{padding:10px;font-size:14px;border-bottom:1px solid #1e293b}
+.sidebar-item{padding:8px 10px;font-size:13px;border-bottom:1px solid #1e293b;cursor:pointer}
+.sidebar-item.active{background:#1e293b}
+.sidebar-item img{width:100%;border-radius:6px;margin-top:6px}
+.main{flex:1;display:flex;flex-direction:column}
+header{padding:10px 14px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:10px}
+.menu{font-size:22px;cursor:pointer}
+header span{flex:1}
+header button{background:#ef4444;border:none;color:white;padding:6px 10px;border-radius:6px;cursor:pointer}
+.auth{margin:auto;width:320px;border:1px solid #1e293b;padding:20px;border-radius:12px}
+.auth h2{text-align:center}
+.auth input{width:100%;margin-bottom:10px;padding:10px;background:#020617;color:white;border:1px solid #1e293b;border-radius:6px}
+.auth button{width:100%;padding:10px;background:#22c55e;border:none;border-radius:6px;cursor:pointer}
+.chat{flex:1;padding:14px;overflow-y:auto}
+.msg{max-width:80%;padding:10px;margin-bottom:10px;border-radius:8px;white-space:pre-wrap}
+.user{background:#2563eb;margin-left:auto}
+.bot{background:#1e293b}
+.bot img{max-width:100%;border-radius:8px;margin-top:6px}
+.input-box{display:flex;padding:10px;border-top:1px solid #1e293b}
+.input-box input{flex:1;padding:10px;background:#020617;color:white;border:1px solid #1e293b;border-radius:6px}
+.input-box button{margin-left:6px;padding:10px 16px;background:#22c55e;border:none;border-radius:6px;cursor:pointer}
+.admin{border-top:1px solid #1e293b;padding:10px}
+.admin input{width:100%;padding:8px;margin-bottom:6px;background:#020617;color:white;border:1px solid #1e293b;border-radius:6px}
+.admin button{width:100%;padding:8px;background:#38bdf8;border:none;border-radius:6px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script>
+const app=document.getElementById('app');
+const get=k=>JSON.parse(localStorage.getItem(k));
+const set=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+let users=get('users')||{};
+let currentUser=get('currentUser');
+let apiKey=get('apiKey')||'';
+let images=get('images')||[];
+let chats=get('chats')||{};
+let currentChat=get('currentChat')||'default';
+
+function renderAuth(){
+app.innerHTML=`<div class=auth><h2>Вход / Регистрация</h2><input id=login placeholder=Логин><input id=pass type=password placeholder=Пароль><button onclick=loginUser()>Войти</button></div>`}
+
+function loginUser(){
+const l=login.value.trim(),p=pass.value.trim();
+if(!l||!p)return alert('Введите данные');
+if(!users[l])users[l]={password:p};
+if(users[l].password!==p)return alert('Неверный пароль');
+currentUser=l;set('users',users);set('currentUser',l);renderApp()}
+
+function logout(){localStorage.removeItem('currentUser');location.reload()}
+
+function renderApp(){
+if(!chats[currentUser]) chats[currentUser]={};
+if(!chats[currentUser][currentChat]) chats[currentUser][currentChat]=[];
+app.innerHTML=`
+<div class=sidebar id=sidebar>
+<h3>📜 История чатов</h3>
+<div class="sidebar-item" onclick="newChat()">➕ Новый чат</div>
+<div id="chatList"></div>
+<h3>🖼️ Библиотека</h3>
+<div id=library></div>
+</div>
+<div class=main>
+<header>
+<button onclick="exportChats()" style="background:#22c55e">💾 Экспорт</button>
+<div class=menu onclick=toggleMenu()>☰</div>
+<span>${currentUser}</span>
+<button onclick=logout()>Выйти</button>
+</header>
+<div class=chat id=chat></div>
+<div class=input-box>
+<button onclick="generateImage()" style="background:#a855f7">🎨</button>
+<input id=text placeholder='Сообщение или: нарисуй кота...'>
+<button onclick=sendMsg()>➤</button>
+</div>
+${currentUser==='admin'?`<div class=admin>
+<h4>🔐 Админ-панель</h4>
+<input id=key placeholder='OpenAI API Key' value='${apiKey}'>
+<button onclick=saveKey()>Сохранить ключ</button>
+<hr style='border:1px solid #1e293b;margin:8px 0'>
+<button onclick=toggleAdminUsers()>👥 Пользователи</button>
+<div id=adminUsers style='display:none;margin-top:8px;max-height:200px;overflow:auto'></div>
+</div>`:''}
+</div>`;
+renderChatList();
+loadHistory();
+renderImages();
+}
+
+function toggleMenu(){
+const s=document.getElementById('sidebar');
+s.style.display=s.style.display==='flex'?'none':'flex'}
+
+function renderChatList(){
+const list=document.getElementById('chatList');
+if(!list) return;
+list.innerHTML='';
+Object.keys(chats[currentUser]).forEach(name=>{
+const div=document.createElement('div');
+div.className='sidebar-item'+(name===currentChat?' active':'');
+div.textContent=name;
+div.onclick=()=>{currentChat=name;set('currentChat',name);loadHistory();renderChatList()};
+list.appendChild(div);
+});
+}
+
+function newChat(){
+const name='Чат '+(Object.keys(chats[currentUser]).length+1);
+chats[currentUser][name]=[];
+currentChat=name;
+set('chats',chats);
+set('currentChat',name);
+renderChatList();
+loadHistory();
+}
+
+function loadHistory(){
+const chat=document.getElementById('chat');
+chat.innerHTML='';
+(chats[currentUser][currentChat]||[]).forEach(m=>{
+  if(m.type==='image'){
+    chat.innerHTML+=`<div class='msg bot'><div>${m.text}</div><img src='${m.url}'></div>`;
+  } else {
+    chat.innerHTML+=`<div class='msg ${m.role}'>${m.text}</div>`;
+  }
+});
+chat.scrollTop=999999;
+}
+
+function addMsg(role,text){
+chats[currentUser][currentChat].push({role,text});
+set('chats',chats);loadHistory()}
+
+function addImage(text,url){
+chats[currentUser][currentChat].push({type:'image',text,url});
+images.push(url);set('images',images);set('chats',chats);
+loadHistory();renderImages()}
+
+function renderImages(){
+const lib=document.getElementById('library');if(!lib)return;
+lib.innerHTML='';images.forEach((url,i)=>{
+lib.innerHTML+=`<div class=sidebar-item>Изображение ${i+1}<img src='${url}'></div>`})}
+
+async function sendMsg(){
+const t=text.value.trim();
+if(!t) return;
+if(!apiKey){addMsg('bot','⚠️ API-ключ не установлен администратором.');return;}
+addMsg('user',t);text.value='';
+if(t.toLowerCase().startsWith('нарисуй')||t.toLowerCase().startsWith('сгенерируй')){
+try{
+  // очищаем запрос от командных слов
+  const promptText = t.replace(/^(нарисуй|сгенерируй)/i,'').trim() || t;
+  const r = await fetch('https://api.openai.com/v1/images/generations',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer '+apiKey
+    },
+    body: JSON.stringify({
+      model:'gpt-image-1',
+      prompt: promptText,
+      size:'1024x1024'
+    })
+  });
+  const d = await r.json();
+  if(!d.data || !d.data[0] || !d.data[0].url) throw new Error('no_image');
+  addImage('🖼️ Сгенерированное изображение', d.data[0].url);
+}catch(e){
+  console.error(e);
+  addMsg('bot','❌ Не удалось сгенерировать изображение. Проверь API-ключ и баланс.');
+}
+return}
+try{
+const r=await fetch('https://api.openai.com/v1/chat/completions',{
+method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+apiKey},
+body:JSON.stringify({model:'gpt-4o-mini',messages:[{role:'user',content:t}]})});
+const d=await r.json();
+addMsg('bot',d.choices?.[0]?.message?.content||'Ошибка');
+}catch(e){addMsg('bot','Ошибка сети');}
+}
+
+function toggleAdminUsers(){
+  const box=document.getElementById('adminUsers');
+  if(!box) return;
+  if(box.style.display==='block'){box.style.display='none';return;}
+  box.style.display='block';
+  const usersData=get('users')||{};
+  box.innerHTML='';
+  Object.keys(usersData).forEach(u=>{
+    box.innerHTML+=`<div style="border:1px solid #1e293b;padding:6px;border-radius:6px;margin-bottom:6px;font-size:12px">👤 <b>${u}</b><br>🔑 ${usersData[u].password}</div>`;
+  });
+}
+
+function saveKey(){apiKey=key.value.trim();set('apiKey',apiKey);alert('Ключ сохранён')}
+
+function exportChats(){
+const data=JSON.stringify(chats,null,2);
+const blob=new Blob([data],{type:'application/json'});
+const url=URL.createObjectURL(blob);
+const a=document.createElement('a');
+a.href=url;a.download='kosta_gpt_chats.json';a.click();URL.revokeObjectURL(url);
+}
+
+function generateImage(){
+const input=document.getElementById('text');
+if(!input) return;
+const p=prompt('Введите описание изображения');
+if(!p) return;
+input.value='нарисуй '+p;
+sendMsg();
+}
+
+currentUser?renderApp():renderAuth();
+
+// PWA Service Worker (inline via Blob)
+if ('serviceWorker' in navigator) {
+  const swCode = `
+  const CACHE = 'kosta-gpt-v1';
+  self.addEventListener('install', e => {
+    e.waitUntil(caches.open(CACHE).then(c => c.addAll(['./'])));
+  });
+  self.addEventListener('fetch', e => {
+    e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  });`;
+  const blob = new Blob([swCode], { type: 'text/javascript' });
+  const swUrl = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(swUrl);
+}
+</script>
+</body>
+  </html>
+  
